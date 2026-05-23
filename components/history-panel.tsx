@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight, History, Inbox, Loader2, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
+import { DbSetupBanner } from '@/components/db-setup-banner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -70,6 +71,7 @@ export function HistoryPanel() {
 
   return (
     <div className="space-y-6">
+      <DbSetupBanner onReady={load} />
       <Card>
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

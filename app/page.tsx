@@ -59,6 +59,7 @@ import {
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { AllLeadsPanel } from '@/components/all-leads-panel';
+import { DbSetupBanner } from '@/components/db-setup-banner';
 import { HistoryPanel } from '@/components/history-panel';
 import { LogoutButton } from '@/components/logout-button';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -326,7 +327,9 @@ export default function Page() {
         ) : activeTab === 'history' ? (
           <HistoryPanel />
         ) : !sessionId ? (
-          <UploadStage
+          <div className="space-y-6">
+            <DbSetupBanner />
+            <UploadStage
             file={file}
             dragging={dragging}
             uploading={uploading}
@@ -337,6 +340,7 @@ export default function Page() {
             onChooseFile={onChooseFile}
             upload={upload}
           />
+          </div>
         ) : (
           <DashboardStage
             leads={leads}

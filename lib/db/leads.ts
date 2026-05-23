@@ -2,6 +2,8 @@ import type { Lead, ProcessStats } from '@/lib/processor';
 
 import { createDbClient } from './client';
 
+import { isTableMissingError, getSetupInstructions } from './setup';
+
 export interface DbUpload {
   id: string;
   filename: string;
@@ -36,8 +38,14 @@ export interface ListUploadsResult {
   total: number;
 }
 
-const TABLE_MISSING =
-  'Database tables not found. Run supabase/schema.sql in your Supabase SQL Editor.';
+const TABLE_MISSING = getSetupInstructions();
+
+function mapDbError(error: { code?: string; message: string }): string {
+  if (error.code === '42P01' || isTableMissingError(error.message)) {
+    return TABLE_MISSING;
+  }
+  return error.message;
+}
 
 function normalizeUsername(username: string): string {
   return username.trim().toLowerCase();
@@ -125,10 +133,7 @@ export async function checkDbReady(): Promise<{ ok: boolean; error?: string }> {
   const supabase = createDbClient();
   const { error } = await supabase.from('leads').select('id').limit(1);
   if (!error) return { ok: true };
-  if (error.code === '42P01' || error.message.includes('does not exist')) {
-    return { ok: false, error: TABLE_MISSING };
-  }
-  return { ok: false, error: error.message };
+  return { ok: false, error: mapDbError(error) };
 }
 
 export async function saveUploadToDb(
