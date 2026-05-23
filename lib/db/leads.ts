@@ -217,10 +217,22 @@ export async function saveUploadToDb(
   };
 }
 
+function dayBounds(dateStr: string): { start: string; end: string } {
+  // YYYY-MM-DD → inclusive day range in ISO for timestamptz columns
+  return {
+    start: `${dateStr}T00:00:00.000Z`,
+    end: `${dateStr}T23:59:59.999Z`,
+  };
+}
+
 export async function listAllLeads(opts: {
   query?: string;
   page?: number;
   pageSize?: number;
+  /** Filter column: when the lead was first saved vs last updated */
+  dateField?: 'last_seen' | 'first_seen';
+  dateFrom?: string;
+  dateTo?: string;
 }): Promise<ListLeadsResult> {
   const supabase = createDbClient();
   const ready = await checkDbReady();
@@ -231,16 +243,26 @@ export async function listAllLeads(opts: {
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   const q = (opts.query?.trim() ?? '').replace(/[%_,]/g, '');
+  const dateCol = opts.dateField === 'first_seen' ? 'first_seen_at' : 'last_seen_at';
 
   let builder = supabase
     .from('leads')
     .select('*', { count: 'exact' })
-    .order('last_seen_at', { ascending: false });
+    .order(dateCol, { ascending: false });
 
   if (q) {
     builder = builder.or(
       `username.ilike.%${q}%,name.ilike.%${q}%,email.ilike.%${q}%,country.ilike.%${q}%,category.ilike.%${q}%`,
     );
+  }
+
+  const dateFrom = opts.dateFrom?.trim();
+  const dateTo = opts.dateTo?.trim();
+  if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
+    builder = builder.gte(dateCol, dayBounds(dateFrom).start);
+  }
+  if (dateTo && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+    builder = builder.lte(dateCol, dayBounds(dateTo).end);
   }
 
   const { data, count, error } = await builder.range(from, to);

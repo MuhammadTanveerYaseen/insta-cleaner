@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  Calendar,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -9,8 +10,9 @@ import {
   Inbox,
   Loader2,
   RefreshCw,
+  X,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { DbSetupBanner } from '@/components/db-setup-banner';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +25,14 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -49,12 +59,30 @@ interface DbLeadRow {
   last_filename: string;
 }
 
+type DateField = 'last_seen' | 'first_seen';
+type DatePreset = 'all' | 'today' | '7d' | '30d' | 'custom';
+
 function fmtDate(iso: string) {
   if (!iso) return '—';
   return new Date(iso).toLocaleString(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
+}
+
+function toYmd(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function presetRange(preset: DatePreset): { from?: string; to?: string } {
+  if (preset === 'all') return {};
+  const today = new Date();
+  const end = toYmd(today);
+  if (preset === 'today') return { from: end, to: end };
+  const start = new Date(today);
+  if (preset === '7d') start.setDate(start.getDate() - 6);
+  if (preset === '30d') start.setDate(start.getDate() - 29);
+  return { from: toYmd(start), to: end };
 }
 
 export function AllLeadsPanel() {
@@ -64,7 +92,22 @@ export function AllLeadsPanel() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [dateField, setDateField] = useState<DateField>('last_seen');
+  const [datePreset, setDatePreset] = useState<DatePreset>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+
   const pageSize = 25;
+
+  const activeDates = useMemo(() => {
+    if (datePreset === 'custom') {
+      return { from: dateFrom || undefined, to: dateTo || undefined };
+    }
+    return presetRange(datePreset);
+  }, [datePreset, dateFrom, dateTo]);
+
+  const hasDateFilter = Boolean(activeDates.from || activeDates.to);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,8 +116,12 @@ export function AllLeadsPanel() {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
+        dateField,
       });
       if (query.trim()) params.set('q', query.trim());
+      if (activeDates.from) params.set('dateFrom', activeDates.from);
+      if (activeDates.to) params.set('dateTo', activeDates.to);
+
       const res = await fetch(`/api/leads?${params}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Failed to load leads');
@@ -87,12 +134,28 @@ export function AllLeadsPanel() {
     } finally {
       setLoading(false);
     }
-  }, [page, query]);
+  }, [page, query, dateField, activeDates.from, activeDates.to]);
 
   useEffect(() => {
     const t = setTimeout(load, query ? 300 : 0);
     return () => clearTimeout(t);
   }, [load, query]);
+
+  const onPresetChange = (preset: DatePreset) => {
+    setDatePreset(preset);
+    setPage(1);
+    if (preset !== 'custom') {
+      setDateFrom('');
+      setDateTo('');
+    }
+  };
+
+  const clearDateFilter = () => {
+    setDatePreset('all');
+    setDateFrom('');
+    setDateTo('');
+    setPage(1);
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
@@ -118,14 +181,113 @@ export function AllLeadsPanel() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="relative max-w-md">
-            <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search username, name, email, country..."
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
-              className="pl-9"
-            />
+          <div className="flex flex-col gap-3">
+            <div className="relative max-w-md">
+              <Filter className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search username, name, email, country..."
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+                className="pl-9"
+              />
+            </div>
+
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 p-4">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Calendar className="h-4 w-4 text-primary" />
+                Filter by date
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Date type</Label>
+                  <Select
+                    value={dateField}
+                    onValueChange={(v) => {
+                      setDateField(v as DateField);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="last_seen">Last seen</SelectItem>
+                      <SelectItem value="first_seen">First seen</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Period</Label>
+                  <Select value={datePreset} onValueChange={(v) => onPresetChange(v as DatePreset)}>
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All time</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="7d">Last 7 days</SelectItem>
+                      <SelectItem value="30d">Last 30 days</SelectItem>
+                      <SelectItem value="custom">Custom range</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {datePreset === 'custom' && (
+                  <>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="date-from" className="text-xs text-muted-foreground">
+                        From
+                      </Label>
+                      <Input
+                        id="date-from"
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
+                        className="w-[160px]"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="date-to" className="text-xs text-muted-foreground">
+                        To
+                      </Label>
+                      <Input
+                        id="date-to"
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
+                        className="w-[160px]"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {hasDateFilter && (
+                  <Button variant="ghost" size="sm" onClick={clearDateFilter} className="mb-0.5">
+                    <X className="h-4 w-4" />
+                    Clear dates
+                  </Button>
+                )}
+              </div>
+
+              {hasDateFilter && (
+                <p className="text-xs text-muted-foreground">
+                  Showing leads where{' '}
+                  <strong className="text-foreground">
+                    {dateField === 'last_seen' ? 'last seen' : 'first seen'}
+                  </strong>
+                  {activeDates.from && activeDates.to && activeDates.from === activeDates.to
+                    ? ` is ${activeDates.from}`
+                    : activeDates.from && activeDates.to
+                      ? ` is between ${activeDates.from} and ${activeDates.to}`
+                      : activeDates.from
+                        ? ` is on or after ${activeDates.from}`
+                        : ` is on or before ${activeDates.to}`}
+                </p>
+              )}
+            </div>
           </div>
 
           {error && (
@@ -163,7 +325,11 @@ export function AllLeadsPanel() {
                       <TableCell colSpan={10} className="h-28 text-center">
                         <div className="flex flex-col items-center gap-2 text-muted-foreground">
                           <Inbox className="h-6 w-6" />
-                          <span className="text-sm">No leads saved yet. Upload a file to get started.</span>
+                          <span className="text-sm">
+                            {hasDateFilter || query
+                              ? 'No leads match your filters.'
+                              : 'No leads saved yet. Upload a file to get started.'}
+                          </span>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -220,6 +386,7 @@ export function AllLeadsPanel() {
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
               {total.toLocaleString()} unique lead{total === 1 ? '' : 's'}
+              {hasDateFilter ? ' (filtered)' : ''}
             </p>
             <div className="flex items-center gap-2">
               <Button
