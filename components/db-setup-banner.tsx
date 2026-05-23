@@ -1,6 +1,13 @@
 'use client';
 
-import { AlertCircle, CheckCircle2, Copy, Database, Loader2 } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Copy,
+  Database,
+  ExternalLink,
+  Loader2,
+} from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -15,8 +22,11 @@ import {
 
 interface SetupStatus {
   ready: boolean;
-  error?: string;
+  error?: string | null;
+  schema?: string | null;
+  sql_editor_url?: string | null;
   can_auto_setup?: boolean;
+  db_url_configured?: boolean;
 }
 
 export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
@@ -24,9 +34,11 @@ export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
   const [loading, setLoading] = useState(true);
   const [settingUp, setSettingUp] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
 
   const check = useCallback(async () => {
     setLoading(true);
+    setSetupError(null);
     try {
       const res = await fetch('/api/db/setup');
       const data = await res.json();
@@ -43,26 +55,26 @@ export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
 
   const autoSetup = async () => {
     setSettingUp(true);
+    setSetupError(null);
     try {
       const res = await fetch('/api/db/setup', { method: 'POST' });
       const data = await res.json();
       if (data.ready) {
-        setStatus({ ready: true });
+        setStatus((s) => ({ ...s!, ready: true }));
         onReady?.();
       } else {
-        setStatus({ ready: false, error: data.message ?? data.error });
+        setSetupError(data.message ?? data.error ?? 'Auto setup failed.');
       }
     } catch (err) {
-      setStatus({ ready: false, error: (err as Error).message });
+      setSetupError((err as Error).message);
     } finally {
       setSettingUp(false);
     }
   };
 
-  const copySqlHint = async () => {
-    await navigator.clipboard.writeText(
-      'Open supabase/schema.sql in this project and paste it into Supabase SQL Editor.',
-    );
+  const copySql = async () => {
+    if (!status?.schema) return;
+    await navigator.clipboard.writeText(status.schema);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -86,35 +98,79 @@ export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
           Database not set up
         </CardTitle>
         <CardDescription>
-          Leads are not being saved because the Supabase tables do not exist yet.
+          Uploads work in memory only until you create the Supabase tables once.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <Alert variant="warning">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Why uploads are not stored</AlertTitle>
+          <AlertTitle>Why leads are not saved</AlertTitle>
           <AlertDescription>
-            {status?.error ??
-              'The `public.leads` table is missing. Upload still works in memory, but nothing is saved to history.'}
+            {status?.error ?? 'The `public.leads` table is missing in your Supabase project.'}
           </AlertDescription>
         </Alert>
 
-        <div className="space-y-2 text-sm">
-          <p className="font-medium">Fix (one time):</p>
-          <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
-            <li>Open your Supabase project → <strong className="text-foreground">SQL Editor</strong></li>
-            <li>Paste the SQL from <code className="rounded bg-muted px-1">supabase/schema.sql</code> in this repo</li>
-            <li>Click <strong className="text-foreground">Run</strong>, then click Recheck below</li>
+        <div className="rounded-lg border border-border bg-background p-4 text-sm">
+          <p className="mb-2 font-medium">One-time fix (about 1 minute)</p>
+          <ol className="list-decimal space-y-1.5 pl-5 text-muted-foreground">
+            <li>
+              Click{' '}
+              <strong className="text-foreground">Copy SQL</strong> below
+            </li>
+            <li>
+              Open{' '}
+              {status?.sql_editor_url ? (
+                <a
+                  href={status.sql_editor_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-primary hover:underline"
+                >
+                  Supabase SQL Editor
+                  <ExternalLink className="ml-1 inline h-3 w-3" />
+                </a>
+              ) : (
+                <strong className="text-foreground">Supabase → SQL Editor</strong>
+              )}
+            </li>
+            <li>Paste the SQL and click <strong className="text-foreground">Run</strong></li>
+            <li>Come back here and click <strong className="text-foreground">Recheck database</strong></li>
           </ol>
         </div>
 
+        {status?.db_url_configured && !status.can_auto_setup && (
+          <p className="text-xs text-muted-foreground">
+            Add <code className="rounded bg-muted px-1">SUPABASE_DB_PASSWORD</code> in{' '}
+            <code className="rounded bg-muted px-1">.env.local</code> (from Supabase → Database),
+            then restart the dev server and click Auto-create tables.
+          </p>
+        )}
+
+        {setupError && (
+          <Alert variant="destructive">
+            <AlertDescription>{setupError}</AlertDescription>
+          </Alert>
+        )}
+
         <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={copySql} disabled={!status?.schema}>
+            <Copy className="h-4 w-4" />
+            {copied ? 'SQL copied!' : 'Copy SQL'}
+          </Button>
+          {status?.sql_editor_url && (
+            <Button variant="outline" size="sm" asChild>
+              <a href={status.sql_editor_url} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4" />
+                Open SQL Editor
+              </a>
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={check} disabled={loading}>
             <CheckCircle2 className="h-4 w-4" />
             Recheck database
           </Button>
           {status?.can_auto_setup && (
-            <Button size="sm" onClick={autoSetup} disabled={settingUp}>
+            <Button variant="secondary" size="sm" onClick={autoSetup} disabled={settingUp}>
               {settingUp ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -123,10 +179,6 @@ export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
               Auto-create tables
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={copySqlHint}>
-            <Copy className="h-4 w-4" />
-            {copied ? 'Copied hint' : 'Copy setup hint'}
-          </Button>
         </div>
       </CardContent>
     </Card>

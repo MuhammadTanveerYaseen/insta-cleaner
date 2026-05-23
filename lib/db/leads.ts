@@ -2,7 +2,7 @@ import type { Lead, ProcessStats } from '@/lib/processor';
 
 import { createDbClient } from './client';
 
-import { isTableMissingError, getSetupInstructions } from './setup';
+import { getTableMissingMessage, isTableMissingError } from './setup';
 
 export interface DbUpload {
   id: string;
@@ -38,7 +38,7 @@ export interface ListUploadsResult {
   total: number;
 }
 
-const TABLE_MISSING = getSetupInstructions();
+const TABLE_MISSING = getTableMissingMessage();
 
 function mapDbError(error: { code?: string; message: string }): string {
   if (error.code === '42P01' || isTableMissingError(error.message)) {
