@@ -14,6 +14,11 @@ export async function GET(req: Request) {
     searchParams.get('dateField') === 'first_seen' ? 'first_seen' : 'last_seen';
   const dateFrom = searchParams.get('dateFrom') ?? undefined;
   const dateTo = searchParams.get('dateTo') ?? undefined;
+  const statusFilter = searchParams.get('status') ?? 'all';
+  const categoryFilter = searchParams.get('category') ?? 'all';
+  const countryFilter = searchParams.get('country') ?? 'all';
+  const crmOnly = searchParams.get('crmOnly') === '1';
+  const emailOnly = searchParams.get('emailOnly') === '1';
 
   try {
     const result = await listAllLeads({
@@ -23,6 +28,11 @@ export async function GET(req: Request) {
       dateField,
       dateFrom,
       dateTo,
+      statusFilter,
+      categoryFilter,
+      countryFilter,
+      crmOnly,
+      emailOnly,
     });
     return NextResponse.json(result);
   } catch (err) {

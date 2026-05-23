@@ -87,6 +87,7 @@ const PIPELINE_STEPS = [
 
 export default function Page() {
   const [activeTab, setActiveTab] = useState<AppTab>('upload');
+  const [allLeadsReload, setAllLeadsReload] = useState(0);
 
   // Upload state
   const [file, setFile] = useState<File | null>(null);
@@ -185,7 +186,8 @@ export default function Page() {
       setStats(data.stats);
       setSelected(new Set());
       setPage(1);
-      setActiveTab('upload');
+      setActiveTab('all');
+      setAllLeadsReload((n) => n + 1);
       let msg = `Processed ${data.stats.input_rows} rows into ${data.leads.length} clean leads (min ${MIN_FOLLOWERS.toLocaleString()} followers).`;
       if (data.stats.low_followers > 0) {
         msg += ` Removed ${data.stats.low_followers} below ${MIN_FOLLOWERS.toLocaleString()} followers.`;
@@ -322,62 +324,29 @@ export default function Page() {
       <TopBar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onNewUpload={sessionId ? resetUpload : null}
+        onNewUpload={activeTab === 'all' ? () => { setActiveTab('upload'); resetUpload(); } : null}
         onUploadTab={goToUpload}
       />
       <main className="mx-auto w-full max-w-[1320px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         {activeTab === 'all' ? (
-          <AllLeadsPanel />
+          <AllLeadsPanel reloadToken={allLeadsReload} />
         ) : activeTab === 'history' ? (
           <HistoryPanel />
-        ) : !sessionId ? (
+        ) : (
           <div className="space-y-6">
             <DbSetupBanner />
             <UploadStage
-            file={file}
-            dragging={dragging}
-            uploading={uploading}
-            uploadStatus={uploadStatus}
-            fileInputRef={fileInputRef}
-            onDrop={onDrop}
-            setDragging={setDragging}
-            onChooseFile={onChooseFile}
-            upload={upload}
-          />
+              file={file}
+              dragging={dragging}
+              uploading={uploading}
+              uploadStatus={uploadStatus}
+              fileInputRef={fileInputRef}
+              onDrop={onDrop}
+              setDragging={setDragging}
+              onChooseFile={onChooseFile}
+              upload={upload}
+            />
           </div>
-        ) : (
-          <DashboardStage
-            leads={leads}
-            stats={stats}
-            withEmail={withEmail}
-            crmReadyCount={crmReadyCount}
-            // filters
-            query={query} setQuery={setQuery}
-            statusFilter={statusFilter} setStatusFilter={setStatusFilter}
-            categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter}
-            countryFilter={countryFilter} setCountryFilter={setCountryFilter}
-            crmOnly={crmOnly} setCrmOnly={setCrmOnly}
-            emailOnly={emailOnly} setEmailOnly={setEmailOnly}
-            categories={categories} countries={countries}
-            // table
-            page={page} setPage={setPage}
-            totalPages={totalPages} totalFiltered={filtered.length}
-            pageRows={pageRows} pageSize={PAGE_SIZE}
-            selected={selected} toggleSelect={toggleSelect} toggleSelectAll={toggleSelectAll}
-            setStatusFor={setStatusFor} editField={editField}
-            bulk={bulk}
-            // export + push
-            exportScope={exportScope} setExportScope={setExportScope}
-            doExport={doExport}
-            destination={destination} setDestination={setDestination}
-            webhookUrl={webhookUrl} setWebhookUrl={setWebhookUrl}
-            apiKey={apiKey} setApiKey={setApiKey}
-            baseId={baseId} setBaseId={setBaseId}
-            tableName={tableName} setTableName={setTableName}
-            pushing={pushing}
-            pushStatus={pushStatus}
-            pushToCrm={pushToCrm}
-          />
         )}
       </main>
       <Footer />
@@ -864,9 +833,13 @@ function LeadsTable(p: DashboardStageProps) {
                   <TableCell className="max-w-[180px]">
                     <Editable value={l.name} onChange={(v) => p.editField(l.id, 'name', v)} />
                   </TableCell>
-                  <TableCell className="max-w-[220px]">
-                    <div className="flex items-center gap-2">
-                      <Editable value={l.email} onChange={(v) => p.editField(l.id, 'email', v)} />
+                  <TableCell className="min-w-[220px] max-w-[320px] align-top">
+                    <div className="flex flex-wrap items-start gap-2">
+                      <Editable
+                        value={l.email}
+                        breakAll
+                        onChange={(v) => p.editField(l.id, 'email', v)}
+                      />
                       {l.all_emails && l.all_emails.length > 1 && (
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -925,10 +898,22 @@ function LeadsTable(p: DashboardStageProps) {
   );
 }
 
-function Editable({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function Editable({
+  value,
+  onChange,
+  breakAll,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  breakAll?: boolean;
+}) {
   return (
     <span
-      className="inline-block min-w-[16px] max-w-full cursor-text break-words rounded border-b border-dashed border-transparent px-1 py-0.5 text-sm text-foreground/90 hover:border-border hover:bg-muted/40 focus:border-primary focus:bg-primary/10 focus:outline-none"
+      title={breakAll && value ? value : undefined}
+      className={cn(
+        'inline-block min-w-[16px] max-w-full cursor-text rounded border-b border-dashed border-transparent px-1 py-0.5 text-sm text-foreground/90 hover:border-border hover:bg-muted/40 focus:border-primary focus:bg-primary/10 focus:outline-none',
+        breakAll ? 'break-all leading-snug' : 'break-words',
+      )}
       contentEditable
       suppressContentEditableWarning
       onBlur={(e) => {

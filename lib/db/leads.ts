@@ -2,8 +2,11 @@ import type { Lead, ProcessStats } from '@/lib/processor';
 import { MIN_FOLLOWERS } from '@/lib/processor';
 
 import { createDbClient } from './client';
+import { applyLeadFilters, type LeadListFilters } from './lead-filters';
 
 import { getTableMissingMessage, isTableMissingError } from './setup';
+
+export type { LeadListFilters };
 
 export interface DbUpload {
   id: string;
@@ -140,8 +143,25 @@ export async function updateLeadStatus(
   id: string,
   status: Lead['status'],
 ): Promise<DbLead> {
-  if (!VALID_STATUSES.includes(status)) {
-    throw new Error('Invalid status.');
+  return updateLead(id, { status });
+}
+
+export async function updateLead(
+  id: string,
+  patch: Partial<Pick<Lead, 'name' | 'email' | 'category' | 'country' | 'status'>>,
+): Promise<DbLead> {
+  const row: Record<string, unknown> = {};
+  if (patch.status !== undefined) {
+    if (!VALID_STATUSES.includes(patch.status)) throw new Error('Invalid status.');
+    row.status = patch.status;
+  }
+  if (patch.name !== undefined) row.name = patch.name.trim();
+  if (patch.email !== undefined) row.email = patch.email.trim();
+  if (patch.category !== undefined) row.category = patch.category.trim();
+  if (patch.country !== undefined) row.country = patch.country.trim();
+
+  if (!Object.keys(row).length) {
+    throw new Error('No fields to update.');
   }
 
   const supabase = createDbClient();
@@ -150,13 +170,34 @@ export async function updateLeadStatus(
 
   const { data, error } = await supabase
     .from('leads')
-    .update({ status })
+    .update(row)
     .eq('id', id)
     .select('*')
     .single();
 
   if (error) throw new Error(error.message);
   return rowToDbLead(data);
+}
+
+export async function bulkUpdateLeadStatus(
+  ids: string[],
+  status: Lead['status'],
+): Promise<number> {
+  if (!ids.length) return 0;
+  if (!VALID_STATUSES.includes(status)) throw new Error('Invalid status.');
+
+  const supabase = createDbClient();
+  const ready = await checkDbReady();
+  if (!ready.ok) throw new Error(ready.error);
+
+  const { data, error } = await supabase
+    .from('leads')
+    .update({ status })
+    .in('id', ids)
+    .select('id');
+
+  if (error) throw new Error(error.message);
+  return data?.length ?? 0;
 }
 
 export async function checkDbReady(): Promise<{ ok: boolean; error?: string }> {
@@ -247,23 +288,9 @@ export async function saveUploadToDb(
   };
 }
 
-function dayBounds(dateStr: string): { start: string; end: string } {
-  // YYYY-MM-DD → inclusive day range in ISO for timestamptz columns
-  return {
-    start: `${dateStr}T00:00:00.000Z`,
-    end: `${dateStr}T23:59:59.999Z`,
-  };
-}
-
-export async function listAllLeads(opts: {
-  query?: string;
-  page?: number;
-  pageSize?: number;
-  /** Filter column: when the lead was first saved vs last updated */
-  dateField?: 'last_seen' | 'first_seen';
-  dateFrom?: string;
-  dateTo?: string;
-}): Promise<ListLeadsResult> {
+export async function listAllLeads(
+  opts: LeadListFilters & { page?: number; pageSize?: number },
+): Promise<ListLeadsResult> {
   const supabase = createDbClient();
   const ready = await checkDbReady();
   if (!ready.ok) throw new Error(ready.error);
@@ -272,36 +299,109 @@ export async function listAllLeads(opts: {
   const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25));
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
-  const q = (opts.query?.trim() ?? '').replace(/[%_,]/g, '');
-  const dateCol = opts.dateField === 'first_seen' ? 'first_seen_at' : 'last_seen_at';
 
-  let builder = supabase
-    .from('leads')
-    .select('*', { count: 'exact' })
-    .gte('followers', MIN_FOLLOWERS)
-    .order(dateCol, { ascending: false });
-
-  if (q) {
-    builder = builder.or(
-      `username.ilike.%${q}%,name.ilike.%${q}%,email.ilike.%${q}%,country.ilike.%${q}%,category.ilike.%${q}%`,
-    );
-  }
-
-  const dateFrom = opts.dateFrom?.trim();
-  const dateTo = opts.dateTo?.trim();
-  if (dateFrom && /^\d{4}-\d{2}-\d{2}$/.test(dateFrom)) {
-    builder = builder.gte(dateCol, dayBounds(dateFrom).start);
-  }
-  if (dateTo && /^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
-    builder = builder.lte(dateCol, dayBounds(dateTo).end);
-  }
-
-  const { data, count, error } = await builder.range(from, to);
+  const { builder, dateCol } = applyLeadFilters(supabase, opts);
+  const { data, count, error } = await builder
+    .order(dateCol, { ascending: false })
+    .range(from, to);
   if (error) throw new Error(error.message);
 
   return {
     leads: (data ?? []).map((row) => rowToDbLead(row)),
     total: count ?? 0,
+  };
+}
+
+export async function listLeadsForExport(
+  opts: LeadListFilters & { scope?: 'approved' | 'crm_ready' | 'all' },
+): Promise<DbLead[]> {
+  const supabase = createDbClient();
+  const ready = await checkDbReady();
+  if (!ready.ok) throw new Error(ready.error);
+
+  const scope = opts.scope ?? 'approved';
+  const { builder, dateCol } = applyLeadFilters(supabase, opts);
+  let q = builder.order(dateCol, { ascending: false });
+
+  if (scope === 'approved') q = q.eq('status', 'approved');
+  else if (scope === 'crm_ready') q = q.eq('crm_ready', true);
+
+  const { data, error } = await q.range(0, 9999);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => rowToDbLead(row));
+}
+
+export async function getLeadsByIds(ids: string[]): Promise<DbLead[]> {
+  if (!ids.length) return [];
+  const supabase = createDbClient();
+  const { data, error } = await supabase.from('leads').select('*').in('id', ids);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => rowToDbLead(row));
+}
+
+export async function getLeadFilterOptions(): Promise<{
+  categories: string[];
+  countries: string[];
+}> {
+  const supabase = createDbClient();
+  const ready = await checkDbReady();
+  if (!ready.ok) throw new Error(ready.error);
+
+  const { data, error } = await supabase
+    .from('leads')
+    .select('category, country')
+    .gte('followers', MIN_FOLLOWERS)
+    .range(0, 4999);
+  if (error) throw new Error(error.message);
+
+  const categories = new Set<string>();
+  const countries = new Set<string>();
+  for (const row of data ?? []) {
+    const c = String(row.category ?? '').trim();
+    const co = String(row.country ?? '').trim();
+    if (c) categories.add(c);
+    if (co) countries.add(co);
+  }
+  return {
+    categories: [...categories].sort(),
+    countries: [...countries].sort(),
+  };
+}
+
+export interface AllLeadsSummaryStats {
+  total: number;
+  with_email: number;
+  crm_ready: number;
+  approved: number;
+  pending: number;
+}
+
+export async function getAllLeadsSummaryStats(): Promise<AllLeadsSummaryStats> {
+  const supabase = createDbClient();
+  const ready = await checkDbReady();
+  if (!ready.ok) throw new Error(ready.error);
+
+  const base = () =>
+    supabase.from('leads').select('id', { count: 'exact', head: true }).gte('followers', MIN_FOLLOWERS);
+
+  const [total, withEmail, crmReady, approved, pending] = await Promise.all([
+    base(),
+    base().not('email', 'eq', ''),
+    base().eq('crm_ready', true),
+    base().eq('status', 'approved'),
+    base().eq('status', 'pending'),
+  ]);
+
+  for (const res of [total, withEmail, crmReady, approved, pending]) {
+    if (res.error) throw new Error(res.error.message);
+  }
+
+  return {
+    total: total.count ?? 0,
+    with_email: withEmail.count ?? 0,
+    crm_ready: crmReady.count ?? 0,
+    approved: approved.count ?? 0,
+    pending: pending.count ?? 0,
   };
 }
 
@@ -349,7 +449,7 @@ export async function getDbStats(): Promise<{
   if (!ready.ok) throw new Error(ready.error);
 
   const [leadsRes, uploadsRes] = await Promise.all([
-    supabase.from('leads').select('id', { count: 'exact', head: true }),
+    supabase.from('leads').select('id', { count: 'exact', head: true }).gte('followers', MIN_FOLLOWERS),
     supabase.from('uploads').select('id', { count: 'exact', head: true }),
   ]);
 
