@@ -64,6 +64,7 @@ import { HistoryPanel } from '@/components/history-panel';
 import { LogoutButton } from '@/components/logout-button';
 import { ThemeToggle } from '@/components/theme-toggle';
 import type { Lead, ProcessStats } from '@/lib/processor';
+import { MIN_FOLLOWERS } from '@/lib/processor';
 import { cn } from '@/lib/utils';
 
 type StatusKind = 'ok' | 'err' | 'info';
@@ -185,7 +186,10 @@ export default function Page() {
       setSelected(new Set());
       setPage(1);
       setActiveTab('upload');
-      let msg = `Processed ${data.stats.input_rows} rows into ${data.leads.length} clean leads.`;
+      let msg = `Processed ${data.stats.input_rows} rows into ${data.leads.length} clean leads (min ${MIN_FOLLOWERS.toLocaleString()} followers).`;
+      if (data.stats.low_followers > 0) {
+        msg += ` Removed ${data.stats.low_followers} below ${MIN_FOLLOWERS.toLocaleString()} followers.`;
+      }
       if (data.db?.saved) {
         msg += ` Saved ${data.db.new_leads} new unique lead${data.db.new_leads === 1 ? '' : 's'} (${data.db.duplicates_skipped} duplicate${data.db.duplicates_skipped === 1 ? '' : 's'} skipped). Total in database: ${data.db.total_unique.toLocaleString()}.`;
       } else if (data.db?.error) {
@@ -498,6 +502,7 @@ function UploadStage(props: UploadStageProps) {
             Drop a <strong className="text-foreground">CSV</strong>,{' '}
             <strong className="text-foreground">XLSX</strong>, or{' '}
             <strong className="text-foreground">JSON</strong> file. Max 25&nbsp;MB.
+            Only accounts with <strong className="text-foreground">{MIN_FOLLOWERS.toLocaleString()}+</strong> followers are kept.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -622,6 +627,7 @@ function DashboardStage(p: DashboardStageProps) {
         withEmail={p.withEmail}
         dupes={p.stats?.duplicates_removed ?? 0}
         spam={p.stats?.spam_removed ?? 0}
+        lowFollowers={p.stats?.low_followers ?? 0}
       />
 
       <Card>
@@ -670,10 +676,10 @@ interface StatItem {
 }
 
 function StatGrid({
-  inputRows, cleaned, crmReady, withEmail, dupes, spam,
+  inputRows, cleaned, crmReady, withEmail, dupes, spam, lowFollowers,
 }: {
   inputRows: number; cleaned: number; crmReady: number;
-  withEmail: number; dupes: number; spam: number;
+  withEmail: number; dupes: number; spam: number; lowFollowers: number;
 }) {
   const items = [
     { icon: Database,      label: 'Input rows',        value: inputRows, tone: 'default' },
@@ -682,6 +688,7 @@ function StatGrid({
     { icon: Mail,          label: 'With email',        value: withEmail, tone: 'info' },
     { icon: RotateCcw,     label: 'Duplicates removed',value: dupes, tone: 'warning' },
     { icon: Trash2,        label: 'Spam removed',      value: spam, tone: 'destructive' },
+    { icon: Filter,        label: 'Under 4.8K removed', value: lowFollowers, tone: 'warning' },
   ] as const;
 
   const toneStyles: Record<NonNullable<StatItem['tone']>, string> = {
@@ -693,7 +700,7 @@ function StatGrid({
   };
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
       {items.map(({ icon: Icon, label, value, tone }) => (
         <Card key={label} className="overflow-hidden">
           <CardContent className="flex items-center gap-3 p-4">

@@ -55,6 +55,9 @@ export interface ProcessResult {
 const USERNAME_RE = /^[a-zA-Z0-9._]{1,30}$/;
 const COUNT_RE = /^([\d,.]+)\s*([kmb]?)$/i;
 
+/** Leads below this follower count are dropped during processing. */
+export const MIN_FOLLOWERS = 4800;
+
 // ---------------------------------------------------------------------------
 // Email extraction
 // ---------------------------------------------------------------------------
@@ -552,6 +555,7 @@ export function processRows(rows: RawRow[]): ProcessResult {
     const scrapedCategory = s(field(row, 'category'));
 
     if (isSpam(username, bio, followers)) { stats.spam_removed++; continue; }
+    if (followers < MIN_FOLLOWERS) { stats.low_followers++; continue; }
 
     // Sweep every string-ish value on the row as a fallback - lots of
     // scrapers stash contact info in unmapped columns like `contact_info`,
@@ -566,7 +570,6 @@ export function processRows(rows: RawRow[]): ProcessResult {
 
     const blockers: string[] = [];
     if (!profileUrl) blockers.push('missing profile_url');
-    if (followers <= 1000) { blockers.push('followers <= 1000'); stats.low_followers++; }
     const email = emails[0] ?? '';
     if (!email && !website) { blockers.push('no email or website'); stats.missing_contact++; }
 

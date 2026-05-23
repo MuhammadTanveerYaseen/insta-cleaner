@@ -2,6 +2,7 @@
 
 import {
   Calendar,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -15,6 +16,8 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { DbSetupBanner } from '@/components/db-setup-banner';
+import type { Lead } from '@/lib/processor';
+import { MIN_FOLLOWERS } from '@/lib/processor';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -53,11 +56,29 @@ interface DbLeadRow {
   profile_url: string;
   crm_ready: boolean;
   verified: boolean;
+  status: Lead['status'];
   first_seen_at: string;
   last_seen_at: string;
   times_seen: number;
   last_filename: string;
 }
+
+const STATUS_VARIANT: Record<
+  Lead['status'],
+  'default' | 'success' | 'destructive' | 'info' | 'warning'
+> = {
+  pending: 'warning',
+  approved: 'success',
+  rejected: 'destructive',
+  pushed: 'info',
+};
+
+const STATUS_ROW: Record<Lead['status'], string> = {
+  pending: '',
+  approved: 'bg-success/5 hover:bg-success/10',
+  rejected: 'bg-destructive/5 opacity-70 hover:bg-destructive/10',
+  pushed: 'bg-info/5 hover:bg-info/10',
+};
 
 type DateField = 'last_seen' | 'first_seen';
 type DatePreset = 'all' | 'today' | '7d' | '30d' | 'custom';
@@ -92,6 +113,7 @@ export function AllLeadsPanel() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   const [dateField, setDateField] = useState<DateField>('last_seen');
   const [datePreset, setDatePreset] = useState<DatePreset>('all');
@@ -157,6 +179,28 @@ export function AllLeadsPanel() {
     setPage(1);
   };
 
+  const setStatus = async (id: string, status: Lead['status']) => {
+    setUpdatingId(id);
+    setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, status } : l)));
+    try {
+      const res = await fetch(`/api/leads/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Update failed');
+      if (data.lead) {
+        setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...data.lead } : l)));
+      }
+    } catch (err) {
+      setError((err as Error).message);
+      load();
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
@@ -171,7 +215,7 @@ export function AllLeadsPanel() {
                 All Leads
               </CardTitle>
               <CardDescription>
-                Every unique lead saved across uploads. Duplicates are merged by username.
+                Unique leads with {MIN_FOLLOWERS.toLocaleString()}+ followers. Duplicates are merged by username.
               </CardDescription>
             </div>
             <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -298,7 +342,7 @@ export function AllLeadsPanel() {
 
           <div className="rounded-lg border border-border">
             <div className="overflow-x-auto">
-              <Table className="min-w-[960px]">
+              <Table className="min-w-[1100px]">
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Username</TableHead>
@@ -308,21 +352,23 @@ export function AllLeadsPanel() {
                     <TableHead>Category</TableHead>
                     <TableHead>Country</TableHead>
                     <TableHead>Profile</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>First seen</TableHead>
                     <TableHead>Last seen</TableHead>
                     <TableHead className="text-center">Times</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading ? (
                     <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={10} className="h-28 text-center">
+                      <TableCell colSpan={12} className="h-28 text-center">
                         <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
                       </TableCell>
                     </TableRow>
                   ) : leads.length === 0 ? (
                     <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={10} className="h-28 text-center">
+                      <TableCell colSpan={12} className="h-28 text-center">
                         <div className="flex flex-col items-center gap-2 text-muted-foreground">
                           <Inbox className="h-6 w-6" />
                           <span className="text-sm">
@@ -335,7 +381,7 @@ export function AllLeadsPanel() {
                     </TableRow>
                   ) : (
                     leads.map((l) => (
-                      <TableRow key={l.id}>
+                      <TableRow key={l.id} className={STATUS_ROW[l.status] ?? ''}>
                         <TableCell>
                           <div className="flex items-center gap-2 font-medium">
                             @{l.username}
@@ -362,6 +408,11 @@ export function AllLeadsPanel() {
                             </a>
                           ) : '—'}
                         </TableCell>
+                        <TableCell>
+                          <Badge variant={STATUS_VARIANT[l.status]} className="capitalize">
+                            {l.status}
+                          </Badge>
+                        </TableCell>
                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                           {fmtDate(l.first_seen_at)}
                         </TableCell>
@@ -373,6 +424,44 @@ export function AllLeadsPanel() {
                             <Badge variant="warning">{l.times_seen}×</Badge>
                           ) : (
                             <span className="text-muted-foreground">1</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {l.status !== 'approved' && l.status !== 'pushed' ? (
+                            <div className="inline-flex gap-1">
+                              <Button
+                                size="sm"
+                                variant="success"
+                                disabled={updatingId === l.id}
+                                onClick={() => setStatus(l.id, 'approved')}
+                              >
+                                {updatingId === l.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                disabled={updatingId === l.id}
+                                onClick={() => setStatus(l.id, 'rejected')}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          ) : l.status === 'approved' ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              disabled={updatingId === l.id}
+                              onClick={() => setStatus(l.id, 'pending')}
+                              className="text-xs"
+                            >
+                              Reset
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
                           )}
                         </TableCell>
                       </TableRow>

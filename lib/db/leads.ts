@@ -1,4 +1,5 @@
 import type { Lead, ProcessStats } from '@/lib/processor';
+import { MIN_FOLLOWERS } from '@/lib/processor';
 
 import { createDbClient } from './client';
 
@@ -126,7 +127,36 @@ function mergeLead(existing: Record<string, unknown>, incoming: ReturnType<typeo
     channel_id: incoming.channel_id || String(existing.channel_id ?? ''),
     crm_ready: incoming.crm_ready || Boolean(existing.crm_ready),
     times_seen: Number(existing.times_seen ?? 1) + 1,
+    // Keep review status when re-uploading the same username.
+    status: ['approved', 'rejected', 'pushed'].includes(String(existing.status))
+      ? String(existing.status)
+      : incoming.status,
   };
+}
+
+const VALID_STATUSES: Lead['status'][] = ['pending', 'approved', 'rejected', 'pushed'];
+
+export async function updateLeadStatus(
+  id: string,
+  status: Lead['status'],
+): Promise<DbLead> {
+  if (!VALID_STATUSES.includes(status)) {
+    throw new Error('Invalid status.');
+  }
+
+  const supabase = createDbClient();
+  const ready = await checkDbReady();
+  if (!ready.ok) throw new Error(ready.error);
+
+  const { data, error } = await supabase
+    .from('leads')
+    .update({ status })
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) throw new Error(error.message);
+  return rowToDbLead(data);
 }
 
 export async function checkDbReady(): Promise<{ ok: boolean; error?: string }> {
@@ -248,6 +278,7 @@ export async function listAllLeads(opts: {
   let builder = supabase
     .from('leads')
     .select('*', { count: 'exact' })
+    .gte('followers', MIN_FOLLOWERS)
     .order(dateCol, { ascending: false });
 
   if (q) {
