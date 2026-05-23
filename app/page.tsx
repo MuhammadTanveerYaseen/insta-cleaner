@@ -402,7 +402,7 @@ interface UploadStageProps {
   dragging: boolean;
   uploading: boolean;
   uploadStatus: StatusMsg | null;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  fileInputRef: React.RefObject<HTMLInputElement>;
   onDrop: (e: React.DragEvent) => void;
   setDragging: (v: boolean) => void;
   onChooseFile: (f: File | null) => void;
@@ -605,7 +605,7 @@ function StatGrid({
   withEmail: number; dupes: number; spam: number;
 }) {
   const items = [
-    { icon: Database,      label: 'Input rows',        value: inputRows },
+    { icon: Database,      label: 'Input rows',        value: inputRows, tone: 'default' },
     { icon: Users,         label: 'Cleaned leads',     value: cleaned, tone: 'info' },
     { icon: CircleCheck,   label: 'CRM ready',         value: crmReady, tone: 'success' },
     { icon: Mail,          label: 'With email',        value: withEmail, tone: 'info' },
