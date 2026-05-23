@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { saveUploadToDb } from '@/lib/db/leads';
 import { parseUpload } from '@/lib/parseUpload';
 import { processRows } from '@/lib/processor';
 import { newSessionId, sessions } from '@/lib/store';
@@ -56,10 +57,28 @@ export async function POST(req: Request) {
     stats,
   });
 
+  // Persist unique leads to Supabase (dedupe by username).
+  let db: Awaited<ReturnType<typeof saveUploadToDb>> | null = null;
+  let dbError: string | null = null;
+  try {
+    db = await saveUploadToDb(name, leads, stats);
+  } catch (err) {
+    dbError = (err as Error).message;
+  }
+
   return NextResponse.json({
     session_id: sessionId,
     filename: name,
     stats,
     leads,
+    db: db
+      ? {
+          saved: true,
+          upload_id: db.upload_id,
+          new_leads: db.new_leads,
+          duplicates_skipped: db.duplicates_skipped,
+          total_unique: db.total_unique,
+        }
+      : { saved: false, error: dbError },
   });
 }

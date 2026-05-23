@@ -12,6 +12,7 @@ import {
   FileSpreadsheet,
   FileText,
   Filter,
+  History,
   Inbox,
   Loader2,
   Mail,
@@ -57,6 +58,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { AllLeadsPanel } from '@/components/all-leads-panel';
+import { HistoryPanel } from '@/components/history-panel';
+import { LogoutButton } from '@/components/logout-button';
 import { ThemeToggle } from '@/components/theme-toggle';
 import type { Lead, ProcessStats } from '@/lib/processor';
 import { cn } from '@/lib/utils';
@@ -66,6 +70,8 @@ type Destination = 'preview' | 'webhook' | 'ghl' | 'hubspot' | 'airtable';
 type ExportScope = 'approved' | 'crm_ready' | 'all';
 
 interface StatusMsg { text: string; kind: StatusKind }
+
+type AppTab = 'upload' | 'all' | 'history';
 
 const PIPELINE_STEPS = [
   'Upload',
@@ -78,6 +84,8 @@ const PIPELINE_STEPS = [
 ];
 
 export default function Page() {
+  const [activeTab, setActiveTab] = useState<AppTab>('upload');
+
   // Upload state
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -175,10 +183,14 @@ export default function Page() {
       setStats(data.stats);
       setSelected(new Set());
       setPage(1);
-      setUploadStatus({
-        text: `Processed ${data.stats.input_rows} rows into ${data.leads.length} clean leads.`,
-        kind: 'ok',
-      });
+      setActiveTab('upload');
+      let msg = `Processed ${data.stats.input_rows} rows into ${data.leads.length} clean leads.`;
+      if (data.db?.saved) {
+        msg += ` Saved ${data.db.new_leads} new unique lead${data.db.new_leads === 1 ? '' : 's'} (${data.db.duplicates_skipped} duplicate${data.db.duplicates_skipped === 1 ? '' : 's'} skipped). Total in database: ${data.db.total_unique.toLocaleString()}.`;
+      } else if (data.db?.error) {
+        msg += ` Database save failed: ${data.db.error}`;
+      }
+      setUploadStatus({ text: msg, kind: data.db?.saved !== false ? 'ok' : 'err' });
     } catch (err) {
       setUploadStatus({ text: `Error: ${(err as Error).message}`, kind: 'err' });
     } finally {
@@ -193,7 +205,12 @@ export default function Page() {
     setFile(null);
     setUploadStatus(null);
     setSelected(new Set());
+    setActiveTab('upload');
     if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const goToUpload = () => {
+    setActiveTab('upload');
   };
 
   const patchLead = useCallback(async (id: string, body: Partial<Lead>) => {
@@ -297,9 +314,18 @@ export default function Page() {
   // ===== Render =====
   return (
     <div className="min-h-screen">
-      <TopBar onNewUpload={sessionId ? resetUpload : null} />
+      <TopBar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onNewUpload={sessionId ? resetUpload : null}
+        onUploadTab={goToUpload}
+      />
       <main className="mx-auto w-full max-w-[1320px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        {!sessionId ? (
+        {activeTab === 'all' ? (
+          <AllLeadsPanel />
+        ) : activeTab === 'history' ? (
+          <HistoryPanel />
+        ) : !sessionId ? (
           <UploadStage
             file={file}
             dragging={dragging}
@@ -355,31 +381,72 @@ export default function Page() {
 // Top bar
 // =========================================================================
 
-function TopBar({ onNewUpload }: { onNewUpload: (() => void) | null }) {
+function TopBar({
+  activeTab,
+  setActiveTab,
+  onNewUpload,
+  onUploadTab,
+}: {
+  activeTab: AppTab;
+  setActiveTab: (tab: AppTab) => void;
+  onNewUpload: (() => void) | null;
+  onUploadTab: () => void;
+}) {
+  const tabs: { id: AppTab; label: string; icon: typeof Upload }[] = [
+    { id: 'upload', label: 'Upload', icon: Upload },
+    { id: 'all', label: 'All Leads', icon: Database },
+    { id: 'history', label: 'History', icon: History },
+  ];
+
   return (
     <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto flex w-full max-w-[1320px] items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary text-sm font-bold tracking-tight ring-1 ring-primary/30">
-            IG
+      <div className="mx-auto flex w-full max-w-[1320px] flex-col gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary text-sm font-bold tracking-tight ring-1 ring-primary/30">
+              IG
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-sm font-semibold tracking-tight sm:text-base">
+                Instagram Lead Refinement
+              </h1>
+              <p className="hidden truncate text-xs text-muted-foreground sm:block">
+                Upload &middot; Clean &middot; Extract &middot; Verify &middot; Push
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold tracking-tight sm:text-base">
-              Instagram Lead Refinement
-            </h1>
-            <p className="hidden truncate text-xs text-muted-foreground sm:block">
-              Upload &middot; Clean &middot; Extract &middot; Verify &middot; Push
-            </p>
+          <div className="flex items-center gap-2">
+            {onNewUpload && activeTab === 'upload' && (
+              <Button variant="outline" size="sm" onClick={onNewUpload}>
+                <Plus className="h-4 w-4" /> New upload
+              </Button>
+            )}
+            <ThemeToggle />
+            <LogoutButton />
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {onNewUpload && (
-            <Button variant="outline" size="sm" onClick={onNewUpload}>
-              <Plus className="h-4 w-4" /> New upload
-            </Button>
-          )}
-          <ThemeToggle />
-        </div>
+
+        <nav className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
+          {tabs.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                if (id === 'upload') onUploadTab();
+                setActiveTab(id);
+              }}
+              className={cn(
+                'inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors sm:flex-none sm:px-4',
+                activeTab === id
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span className="truncate">{label}</span>
+            </button>
+          ))}
+        </nav>
       </div>
     </header>
   );
