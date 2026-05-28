@@ -1,4 +1,19 @@
 import type { CrmPayload, Lead } from '@/lib/processor';
+import { toInfluverseCrmPayload } from '@/lib/processor';
+
+function influverseCrmConfig(opts: { webhookUrl: string; apiKey: string }) {
+  const url =
+    opts.webhookUrl ||
+    process.env.INFLUVERSE_CRM_URL ||
+    process.env.CRM_API_URL ||
+    '';
+  const key =
+    opts.apiKey ||
+    process.env.INFLUVERSE_CRM_KEY ||
+    process.env.CRM_API_KEY ||
+    'influverse-meer';
+  return { url, key };
+}
 
 export interface PushResponse {
   destination: string;
@@ -130,6 +145,43 @@ export async function pushAirtable(
   return response;
 }
 
+export async function pushInfluverse(
+  crmUrl: string,
+  crmKey: string,
+  leads: Lead[],
+  response: PushResponse,
+): Promise<PushResponse> {
+  const errors: string[] = [];
+  let pushed = 0;
+  for (const lead of leads) {
+    const payload = toInfluverseCrmPayload(lead);
+    try {
+      const r = await fetch(crmUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CRM-Key': crmKey,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        throw new Error(
+          `HTTP ${r.status}${detail ? `: ${detail.slice(0, 160)}` : ''}`,
+        );
+      }
+      lead.status = 'pushed';
+      pushed++;
+    } catch (err) {
+      errors.push(`${lead.username}: ${(err as Error).message}`);
+    }
+  }
+  response.pushed = pushed;
+  response.errors = errors;
+  return response;
+}
+
 export async function runCrmPush(
   destination: string,
   targets: Lead[],
@@ -153,6 +205,16 @@ export async function runCrmPush(
     response.message = `Preview only - ${payloads.length} record(s) ready. Configure a destination to actually send.`;
     for (const lead of targets) lead.status = 'pushed';
     return response;
+  }
+
+  if (destination === 'influverse') {
+    const { url, key } = influverseCrmConfig(opts);
+    if (!url) {
+      throw new Error(
+        'Set INFLUVERSE_CRM_URL in environment (or provide webhook_url). Example: https://your-api/api/crm',
+      );
+    }
+    return pushInfluverse(url, key, targets, response);
   }
 
   if (destination === 'webhook') {

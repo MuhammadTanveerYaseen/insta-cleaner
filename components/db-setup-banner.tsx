@@ -8,7 +8,7 @@ import {
   ExternalLink,
   Loader2,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,22 @@ export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
   const [copied, setCopied] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
 
+  const onReadyRef = useRef(onReady);
+  const wasReadyRef = useRef(false);
+
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  });
+
+  const notifyReady = useCallback((ready: boolean) => {
+    if (ready && !wasReadyRef.current) {
+      wasReadyRef.current = true;
+      onReadyRef.current?.();
+    } else if (!ready) {
+      wasReadyRef.current = false;
+    }
+  }, []);
+
   const check = useCallback(async () => {
     setLoading(true);
     setSetupError(null);
@@ -43,15 +59,18 @@ export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
       const res = await fetch('/api/db/setup');
       const data = await res.json();
       setStatus(data);
-      if (data.ready) onReady?.();
+      notifyReady(Boolean(data.ready));
     } catch {
       setStatus({ ready: false, error: 'Could not reach setup API.' });
+      wasReadyRef.current = false;
     } finally {
       setLoading(false);
     }
-  }, [onReady]);
+  }, [notifyReady]);
 
-  useEffect(() => { check(); }, [check]);
+  useEffect(() => {
+    check();
+  }, [check]);
 
   const autoSetup = async () => {
     setSettingUp(true);
@@ -61,7 +80,7 @@ export function DbSetupBanner({ onReady }: { onReady?: () => void }) {
       const data = await res.json();
       if (data.ready) {
         setStatus((s) => ({ ...s!, ready: true }));
-        onReady?.();
+        notifyReady(true);
       } else {
         setSetupError(data.message ?? data.error ?? 'Auto setup failed.');
       }

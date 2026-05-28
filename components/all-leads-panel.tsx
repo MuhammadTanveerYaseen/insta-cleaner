@@ -51,7 +51,7 @@ import { MIN_FOLLOWERS } from '@/lib/processor';
 type DateField = 'last_seen' | 'first_seen';
 type DatePreset = 'all' | 'today' | '7d' | '30d' | 'custom';
 type ExportScope = 'approved' | 'crm_ready' | 'all';
-type Destination = 'preview' | 'webhook' | 'ghl' | 'hubspot' | 'airtable';
+type Destination = 'preview' | 'influverse' | 'webhook' | 'ghl' | 'hubspot' | 'airtable';
 type StatusKind = 'ok' | 'err' | 'info';
 
 interface SummaryStats {
@@ -130,7 +130,7 @@ export function AllLeadsPanel({ reloadToken = 0 }: { reloadToken?: number }) {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exportScope, setExportScope] = useState<ExportScope>('approved');
-  const [destination, setDestination] = useState<Destination>('preview');
+  const [destination, setDestination] = useState<Destination>('influverse');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [baseId, setBaseId] = useState('');
@@ -560,6 +560,7 @@ export function AllLeadsPanel({ reloadToken = 0 }: { reloadToken?: number }) {
             <Select value={destination} onValueChange={(v) => setDestination(v as Destination)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="influverse">Influverse CRM</SelectItem>
                 <SelectItem value="preview">Preview (dry run)</SelectItem>
                 <SelectItem value="webhook">Webhook</SelectItem>
                 <SelectItem value="ghl">GoHighLevel</SelectItem>
@@ -567,11 +568,38 @@ export function AllLeadsPanel({ reloadToken = 0 }: { reloadToken?: number }) {
                 <SelectItem value="airtable">Airtable</SelectItem>
               </SelectContent>
             </Select>
-            {(destination === 'webhook' || destination === 'ghl') && (
-              <Input value={webhookUrl} onChange={(e) => setWebhookUrl(e.target.value)} placeholder="Webhook URL" />
+            {destination === 'influverse' && (
+              <p className="text-xs text-muted-foreground">
+                Uses <code className="rounded bg-muted px-1">INFLUVERSE_CRM_URL</code> and{' '}
+                <code className="rounded bg-muted px-1">INFLUVERSE_CRM_KEY</code> from server env,
+                or override URL / key below.
+              </p>
             )}
-            {(destination === 'ghl' || destination === 'hubspot' || destination === 'airtable') && (
-              <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="API key" />
+            {(destination === 'influverse' || destination === 'webhook' || destination === 'ghl') && (
+              <Input
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder={
+                  destination === 'influverse'
+                    ? 'CRM URL (optional if set in env)'
+                    : 'Webhook URL'
+                }
+              />
+            )}
+            {(destination === 'influverse' ||
+              destination === 'ghl' ||
+              destination === 'hubspot' ||
+              destination === 'airtable') && (
+              <Input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={
+                  destination === 'influverse'
+                    ? 'X-CRM-Key (optional if set in env)'
+                    : 'API key'
+                }
+              />
             )}
             {destination === 'airtable' && (
               <div className="grid gap-2 sm:grid-cols-2">

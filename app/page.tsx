@@ -68,7 +68,7 @@ import { MIN_FOLLOWERS } from '@/lib/processor';
 import { cn } from '@/lib/utils';
 
 type StatusKind = 'ok' | 'err' | 'info';
-type Destination = 'preview' | 'webhook' | 'ghl' | 'hubspot' | 'airtable';
+type Destination = 'preview' | 'influverse' | 'webhook' | 'ghl' | 'hubspot' | 'airtable';
 type ExportScope = 'approved' | 'crm_ready' | 'all';
 
 interface StatusMsg { text: string; kind: StatusKind }
@@ -114,7 +114,7 @@ export default function Page() {
 
   // Export + CRM push
   const [exportScope, setExportScope] = useState<ExportScope>('approved');
-  const [destination, setDestination] = useState<Destination>('preview');
+  const [destination, setDestination] = useState<Destination>('influverse');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [baseId, setBaseId] = useState('');
@@ -1010,6 +1010,7 @@ function ActionsCard(p: DashboardStageProps) {
             <Select value={p.destination} onValueChange={(v) => p.setDestination(v as Destination)}>
               <SelectTrigger id="dest"><SelectValue /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="influverse">Influverse CRM</SelectItem>
                 <SelectItem value="preview">Preview (dry run)</SelectItem>
                 <SelectItem value="webhook">Generic webhook</SelectItem>
                 <SelectItem value="ghl">GoHighLevel</SelectItem>
@@ -1019,16 +1020,29 @@ function ActionsCard(p: DashboardStageProps) {
             </Select>
           </div>
 
-          {(p.destination === 'webhook' || p.destination === 'ghl') && (
+          {p.destination === 'influverse' && (
+            <p className="text-xs text-muted-foreground">
+              Server env: INFLUVERSE_CRM_URL + INFLUVERSE_CRM_KEY (or override below).
+            </p>
+          )}
+
+          {(p.destination === 'influverse' || p.destination === 'webhook' || p.destination === 'ghl') && (
             <div className="space-y-1">
-              <Label htmlFor="webhook" className="text-xs text-muted-foreground">Webhook URL</Label>
+              <Label htmlFor="webhook" className="text-xs text-muted-foreground">
+                {p.destination === 'influverse' ? 'CRM URL (optional)' : 'Webhook URL'}
+              </Label>
               <Input id="webhook" value={p.webhookUrl} onChange={(e) => p.setWebhookUrl(e.target.value)} placeholder="https://..." />
             </div>
           )}
-          {(p.destination === 'ghl' || p.destination === 'hubspot' || p.destination === 'airtable') && (
+          {(p.destination === 'influverse' ||
+            p.destination === 'ghl' ||
+            p.destination === 'hubspot' ||
+            p.destination === 'airtable') && (
             <div className="space-y-1">
-              <Label htmlFor="apikey" className="text-xs text-muted-foreground">API key / token</Label>
-              <Input id="apikey" type="password" value={p.apiKey} onChange={(e) => p.setApiKey(e.target.value)} placeholder="•••••••••" />
+              <Label htmlFor="apikey" className="text-xs text-muted-foreground">
+                {p.destination === 'influverse' ? 'X-CRM-Key (optional)' : 'API key / token'}
+              </Label>
+              <Input id="apikey" type="password" value={p.apiKey} onChange={(e) => p.setApiKey(e.target.value)} placeholder="••••••••" />
             </div>
           )}
           {p.destination === 'airtable' && (

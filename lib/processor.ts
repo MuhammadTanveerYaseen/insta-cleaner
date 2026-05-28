@@ -638,3 +638,45 @@ export function toCrmPayload(lead: Lead): CrmPayload {
     platform: 'Instagram',
   };
 }
+
+/** Influverse CRM (`POST /api/crm`) item shape */
+export interface InfluverseCrmItem {
+  type: 'Creator' | 'Brand';
+  name: string;
+  email: string;
+  platform: string;
+  category: string;
+  channelUrl: string;
+  channelId: string;
+  follower: string;
+  phase?: 'potential' | 'outreached' | 'interested' | 'not_interested' | 'on_hold' | 'onboarded';
+  worker?: string;
+  comments?: string;
+}
+
+export function formatFollowerCount(followers: number): string {
+  if (followers >= 1_000_000) {
+    const millions = followers / 1_000_000;
+    return millions >= 10
+      ? `${Math.round(millions)}M`
+      : `${millions.toFixed(1).replace(/\.0$/, '')}M`;
+  }
+  if (followers >= 1_000) return `${Math.round(followers / 1_000)}k`;
+  return String(followers);
+}
+
+export function toInfluverseCrmPayload(lead: Lead): InfluverseCrmItem {
+  const countryNote = lead.country ? `Country: ${lead.country}.` : '';
+  return {
+    type: 'Creator',
+    name: lead.name?.trim() || lead.username,
+    email: lead.email,
+    platform: 'Instagram',
+    category: lead.category?.trim() || 'Other',
+    channelUrl: lead.profile_url || `https://instagram.com/${lead.username}`,
+    channelId: lead.username,
+    follower: formatFollowerCount(lead.followers),
+    phase: 'potential',
+    comments: `Imported from insta-cleaner. ${countryNote}`.trim(),
+  };
+}
